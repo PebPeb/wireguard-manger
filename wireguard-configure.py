@@ -1,29 +1,28 @@
 import subprocess
 import ipaddress
 import re
+import os
 
-
-WG_IPv4NETWORK = '10.0.0.0/24'
+WG_IPv4NETWORK = '10.8.8.0/24'
 
 
 def main():
-  config_path = './server-conf/wg0-example.conf'  # Replace with your actual file path
+  # Example of building a new network
+  new_wgNetwork(2, endPoint="10.0.0.234:51820", serverDir="./server-conf/", peerDir="./peer-conf/", serverFileName="wg-test.conf")
 
-  # n = wgNetwork(config_path)
-  # n.peerConf(n.add_newPeer())
-
-  # n.serverConf()
-
-  new_wgNetwork(4)
-  
+  # Example of appending an newPeer to and existing network
+  append_newPeer_to_existing_wgNetwork("./server-conf/wg-test.conf", endPoint="10.0.0.234:51820", serverDir="./server-conf/", peerDir="./peer-conf/")
 
 
 class wgNetwork:
-  def __init__(self, configFile=None) -> None:
+  def __init__(self, configFile=None, endPoint=None, peerDir='', serverDir='') -> None:
     self.peers = []
     self.host = None
 
-    self.peerDir = ""
+    self.peerDir = peerDir
+    self.serverDir = serverDir
+    self.endPoint = endPoint
+
 
     if configFile != None:
       self.parseConf(configFile)
@@ -56,13 +55,15 @@ class wgNetwork:
           self.host = wgDevice(re.sub(r'/\d+$', '', hosttmp["Address"]), 
                             ipaddress.IPv4Network(hosttmp["Address"], strict=False).netmask,
                             privateKey=hosttmp["PrivateKey"],
-                            port=hosttmp["ListenPort"])
+                            port=hosttmp["ListenPort"],
+                            endPoint=self.endPoint)
           # config["Interface"].update(parse_device(x))
         elif x[0] == "[Peer]":
           peertmp = self.parse_device(x)
           self.peers.append(wgDevice(re.sub(r'/\d+$', '', peertmp["AllowedIPs"]), 
                             ipaddress.IPv4Network(peertmp["AllowedIPs"], strict=False).netmask,
-                            publicKey=peertmp["PublicKey"]))
+                            publicKey=peertmp["PublicKey"],
+                            endPoint=self.endPoint))
 
         else:
           print("WARNING Invalid device \"" + x[1] + "\". Skipping device.")
@@ -110,54 +111,47 @@ class wgNetwork:
 
     newPeer = wgDevice(peerIP, "255.255.255.0", 
            privateKey=peerPrivateKey,
-           publicKey=peerPublicKey)
+           publicKey=peerPublicKey,
+           endPoint=self.endPoint)
     return newPeer  
 
 
   # Expects to receive a wgDevice object
   # Directory to write the config file to
-  def peerConf(self, wgObj, writeTo=None):
+  def peerConf(self, wgObj, fileName=None):
     x = wgObj('interface') + "\n"
-    x += self.host('peer')
-    if writeTo != None:
-      try:
-        with open(writeTo, 'w') as file:
-          file.write(x)
-      except:
-        print("Failed to write to: \"" + writeTo + "\"")
-    else:
-      try:
-        with open(self.peerDir + wgObj.name + ".conf", 'w') as file:
-          file.write(x)
-      except:
-        print("Failed to write to: \"" + self.peerDir + wgObj.name + ".conf" + "\"")
-      
+    x += self.host('endpoint')
+    if fileName == None:
+      fileName = wgObj.name + ".conf"
+    
+    try:
+      with open(self.peerDir + fileName, 'w') as file:
+        file.write(x)
+    except:
+      print("Failed to write to: \"" + self.peerDir + fileName + "\"")
+
     return x
 
-  def serverConf(self, writeTo=None):
+  def serverConf(self, fileName=None):
     x = self.host('interface') + "\n"
     for y in self.peers:
       x += y('peer') + "\n"
     
-    if writeTo != None:
-      try:
-        with open(writeTo, 'w') as file:
-          file.write(x)
-      except:
-        print("Failed to write to: \"" + writeTo + "\"")
-    else:
-      try:
-        with open(self.peerDir + self.host.name + ".conf", 'w') as file:
-          file.write(x)
-      except:
-        print("Failed to write to: \"" + self.peerDir + self.host.name + ".conf" + "\"")
-      
+    if fileName == None:
+      fileName = self.host.name + ".conf"
+
+    try:
+      with open(self.serverDir + fileName, 'w') as file:
+        file.write(x)
+    except:
+      print("Failed to write to: \"" + fileName + "\"")
+
     return x
     
 
 
 class wgDevice:
-  def __init__(self, ip, subnet, privateKey=None, publicKey=None, description=None, name=None, port="5180"):
+  def __init__(self, ip, subnet, endPoint=None, privateKey=None, publicKey=None, description=None, name=None, port="51820"):
     self.privateKey = privateKey if privateKey or publicKey else gen_publicKey()
     self.publicKey = publicKey if publicKey else gen_privateKey(self.privateKey)
     self.ip = ip
@@ -165,25 +159,23 @@ class wgDevice:
     self.description = description if description else ""
     self.name = name if name else "peer_" + self.ip.replace(".", "_")
     self.port = port
+    self.endPoint = endPoint
+
 
   def __str__(self, format_type='default') -> str:
-      if format_type == 'peer' and hasattr(self, 'publicKey'):
+      if (format_type == 'peer' or format_type == 'endpoint') and hasattr(self, 'publicKey'):
           # [Peer] format
           x = "[Peer]\n"
-          x += self.__str__()
           x += "PublicKey = " + self.publicKey + "\n"
+          if format_type == 'endpoint':
+            x += "Endpoint = " + self.endPoint + "\n"
           x += "AllowedIPs = " + self.ip + "/32\n"
       elif format_type == 'interface' and hasattr(self, 'privateKey'):
           # [Interface] format
           x = "[Interface]\n"
-          x += self.__str__()
           x += "PrivateKey = " + self.privateKey + "\n"
           x += "Address = " + self.ip + "/24\n"
           x += "ListenPort = " + str(self.port) + "\n"
-      else:
-          # Default format
-          x = "Name = " + self.name + "\n"
-          x += "Description = " + self.description + "\n"
 
       return x
 
@@ -200,19 +192,32 @@ def gen_privateKey(PrivateKey):
 
 
 
-def new_wgNetwork(numPeers=1):
-  wgVar = wgNetwork()
+def new_wgNetwork(numPeers=1, endPoint=None, peerDir='', serverDir='', serverFileName=None):
+  if endPoint == None:
+    print("Error must provide an endPoint")
+    exit(-1)
+  wgVar = wgNetwork(endPoint=endPoint, peerDir=peerDir, serverDir=serverDir)
   wgVar.host = wgVar.newPeer()
   for i in range(numPeers):
     wgVar.add_newPeer()
   
-  wgVar.serverConf()
+  wgVar.serverConf(fileName=serverFileName)
   for x in wgVar.peers:
     wgVar.peerConf(x)
 
   return wgVar
 
 
+def append_newPeer_to_existing_wgNetwork(configFile, endPoint, peerDir='', serverDir=''):
+  if configFile == None:
+    print("Error must provide an existing .conf file")
+    exit(-1)
+  wgVar = wgNetwork(configFile, endPoint=endPoint, peerDir=peerDir, serverDir=serverDir)
+  newPeer = wgVar.add_newPeer()
+  
+  
+  wgVar.serverConf(fileName=os.path.basename(configFile))
+  wgVar.peerConf(newPeer)
 
 
 if __name__ == "__main__":
