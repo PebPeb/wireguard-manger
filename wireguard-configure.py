@@ -138,7 +138,11 @@ class wgConfig:
       print(devices)
       for x in devices:
         if x[0] == "[Interface]":
-          self.interface = None
+          interfacetmp = self.parse_device(x)
+          self.interface = interface(re.sub(r'/\d+$', '', interfacetmp["Address"]), 
+                            ipaddress.IPv4Network(interfacetmp["Address"], strict=False).netmask,
+                            privateKey=interfacetmp["PrivateKey"],
+                            port=interfacetmp["ListenPort"])
           # config["Interface"].update(parse_device(x))
         elif x[0] == "[Peer]":
           peertmp = self.parse_device(x)
@@ -171,6 +175,7 @@ class wgDevice:
     self.subnet = subnet
     self.description = description if description else ""
     self.name = name if name else "peer_" + self.ip.replace(".", "_")
+    self.port = port
 
   def __str__(self) -> str:
     x = "Name = " + self.name + "\n"
@@ -195,6 +200,7 @@ class interface(wgDevice):
   def __str__(self) -> str:
     x = "[Interface]\n"
     x = x + super().__str__()
+    x = x + "PrivateKey = " + self.privateKey + "\n"
     x = x + "Address = " + self.ip + "/24\n"                  # Currently the subnet mask is hard coded
     x = x + "ListenPort = " + self.port + "\n"              
     return x
@@ -221,5 +227,6 @@ if __name__ == "__main__":
   print(test_peer)
 
   n = wgConfig(config_path)
+  print(n.interface)
   for x in n.peers:
     print(x)
