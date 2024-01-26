@@ -9,14 +9,16 @@ WG_IPv4NETWORK = '10.0.0.0/24'
 def main():
   config_path = './server-conf/wg0-example.conf'  # Replace with your actual file path
 
-  n = wgConfig(config_path)
-  n.peerConf(n.add_peer())
+  # n = wgNetwork(config_path)
+  # n.peerConf(n.add_newPeer())
 
   # n.serverConf()
+
+  new_wgNetwork(4)
   
 
 
-class wgConfig:
+class wgNetwork:
   def __init__(self, configFile=None) -> None:
     self.peers = []
     self.host = None
@@ -79,9 +81,16 @@ class wgConfig:
       print("WARNING Unable to parse \"" + text + "\" not a valid key pair. Skipping line.")
       return None
 
-  def add_peer(self):
+  def add_newPeer(self):
+    newPeer = self.newPeer()
+    self.peers.append(newPeer)
+    return newPeer
+  
+  def newPeer(self):
     # Collecting all the IPs used in the conf so far
-    taken_IPs = [self.host.ip]
+    taken_IPs = []
+    if self.host != None:
+      taken_IPs = [self.host.ip]
     for x in self.peers:
       taken_IPs.append(x.ip)
 
@@ -102,9 +111,9 @@ class wgConfig:
     newPeer = wgDevice(peerIP, "255.255.255.0", 
            privateKey=peerPrivateKey,
            publicKey=peerPublicKey)
-    self.peers.append(newPeer)
-    return newPeer
-  
+    return newPeer  
+
+
   # Expects to receive a wgDevice object
   # Directory to write the config file to
   def peerConf(self, wgObj, writeTo=None):
@@ -125,11 +134,25 @@ class wgConfig:
       
     return x
 
-  def serverConf(self):
-    print(self.host('interface'))
-    for x in self.peers:
-      print(x('peer'))
-
+  def serverConf(self, writeTo=None):
+    x = self.host('interface') + "\n"
+    for y in self.peers:
+      x += y('peer') + "\n"
+    
+    if writeTo != None:
+      try:
+        with open(writeTo, 'w') as file:
+          file.write(x)
+      except:
+        print("Failed to write to: \"" + writeTo + "\"")
+    else:
+      try:
+        with open(self.peerDir + self.host.name + ".conf", 'w') as file:
+          file.write(x)
+      except:
+        print("Failed to write to: \"" + self.peerDir + self.host.name + ".conf" + "\"")
+      
+    return x
     
 
 
@@ -176,6 +199,18 @@ def gen_privateKey(PrivateKey):
 
 
 
+
+def new_wgNetwork(numPeers=1):
+  wgVar = wgNetwork()
+  wgVar.host = wgVar.newPeer()
+  for i in range(numPeers):
+    wgVar.add_newPeer()
+  
+  wgVar.serverConf()
+  for x in wgVar.peers:
+    wgVar.peerConf(x)
+
+  return wgVar
 
 
 
